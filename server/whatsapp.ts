@@ -6,7 +6,7 @@ const INSTANCE_ID =
 const TOKEN =
   process.env.ZAPI_TOKEN || "D69E92226EAEA0D710827FA4";
 const CLIENT_TOKEN =
-  process.env.ZAPI_CLIENT_TOKEN || "Fe21f691315a74cedb7525f665a70d42cS";
+  process.env.ZAPI_CLIENT_TOKEN || "F11cb8ecb6d934af1a2d2f801b86b00fdS";
 
 const BASE_URL = `https://api.z-api.io/instances/${INSTANCE_ID}/token/${TOKEN}`;
 
