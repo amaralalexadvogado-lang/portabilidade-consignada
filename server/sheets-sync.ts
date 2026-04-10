@@ -1,0 +1,244 @@
+// server/sheets-sync.ts
+// Sincroniza automaticamente com o Google Sheets a cada 30 minutos
+
+import { db } from "./db.js";
+import { clients } from "../drizzle/schema.js";
+import { eq } from "drizzle-orm";
+import { detectGender } from "./messages.js";
+
+const SHEET_ID = process.env.GOOGLE_SHEET_ID || "1QZNIROr-CG3d61sZQnGefDZ9D4yLVfMiuOsHi_jk_58";
+
+function getSheetCsvUrl(sheetId: string) {
+  return `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=0`;
+}
+
+// ── Normalização ──────────────────────────────────────────────────────────────
+
+function norm(s: string): string {
+  return s.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "").replace(/[\s_\-\.]+/g, "");
+}
+
+function getCol(row: Record<string, string>, ...keys: string[]): string {
+  const map: Record<string, string> = {};
+  for (const k of Object.keys(row)) map[norm(k)] = k;
+  for (const k of keys) {
+    const orig = map[norm(k)];
+    if (orig !== undefined && row[orig]?.trim()) return row[orig].trim();
+  }
+  return "";
+}
+
+// ── Limpeza de telefone ───────────────────────────────────────────────────────
+// Planilha tem formato: (51) 99326-3542 → precisamos de 5551993263542
+function cleanPhone(raw: string): string {
+  const d = raw.replace(/\D/g, "");
+  // Remove DDI 55 se já vier
+  const local = d.startsWith("55") && d.length > 11 ? d.slice(2) : d;
+  if (local.length < 10 || local.length > 11) return "";
+  return "55" + local;
+}
+
+// ── Limpeza de CPF ────────────────────────────────────────────────────────────
+// Planilha tem: 403.719.991-20 ou 40371999120 — normaliza para só dígitos
+function cleanCpf(raw: string): string {
+  return raw.replace(/\D/g, "").slice(0, 11);
+}
+
+// ── Mapeamento de status ──────────────────────────────────────────────────────
+// Baseado nos valores reais encontrados na planilha
+function mapStatus(raw: string): string | null {
+  const v = norm(raw);
+
+  // Statuses que devem receber mensagens automáticas
+  if (v.includes("aguardaretorno") || v.includes("aguardapagamento") || v.includes("aguardaaverbaçao") || v.includes("aguardaaverbacao")) return "aguarda_retorno_saldo";
+  if (v.includes("aguardadesbloqueio")) return "aguarda_desbloqueio";
+  if (v.includes("pendentedeformalizaçao") || v.includes("pendenteformalizacao") || v.includes("pendentedeformaliz")) return "pendente_formalizacao";
+  if (v === "pago" || v.includes("aprovad")) return "aprovado";
+
+  // Statuses que NÃO devem receber mensagens — ignoramos esses clientes
+  if (v.includes("reprovad") || v.includes("cancelad") || v.includes("naoencont") || v === "-" || v === "") return null;
+
+  // Padrão: se não reconheceu, ignora
+  return null;
+}
+
+// ── Extração de data de retorno do campo OBS ──────────────────────────────────
+// Formato: "PREVISÃO - 09/04/2026"
+function extractDate(obs: string): Date | null {
+  const m = obs.match(/PREVIS[AÃ]O\s*[-–]\s*(\d{2}\/\d{2}\/\d{4})/i);
+  if (!m) return null;
+  const [d, mo, y] = m[1].split("/");
+  const date = new Date(Number(y), Number(mo) - 1, Number(d));
+  if (isNaN(date.getTime())) return null;
+  return date;
+}
+
+// ── Extração de link do campo OBS ────────────────────────────────────────────
+// Exemplos reais: https://cliente.app/external/xxx ou https://web.c6consig.com.br/xxx
+function extractLink(obs: string): string | null {
+  const m = obs.match(/https?:\/\/[^\s,]+/);
+  return m ? m[0] : null;
+}
+
+// ── Parser CSV ────────────────────────────────────────────────────────────────
+
+function parseCsv(text: string): Record<string, string>[] {
+  const lines = text.split(/\r?\n/).filter((l) => l.trim());
+  if (lines.length < 2) return [];
+
+  const headers = splitCsvLine(lines[0]);
+  const rows: Record<string, string>[] = [];
+
+  for (let i = 1; i < lines.length; i++) {
+    const values = splitCsvLine(lines[i]);
+    if (values.every((v) => !v.trim())) continue;
+    const row: Record<string, string> = {};
+    headers.forEach((h, idx) => { row[h.trim()] = (values[idx] || "").trim(); });
+    rows.push(row);
+  }
+  return rows;
+}
+
+function splitCsvLine(line: string): string[] {
+  const result: string[] = [];
+  let cur = "", inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (c === '"') { inQ && line[i + 1] === '"' ? (cur += '"', i++) : (inQ = !inQ); }
+    else if (c === "," && !inQ) { result.push(cur); cur = ""; }
+    else cur += c;
+  }
+  result.push(cur);
+  return result;
+}
+
+// ── Resultado ─────────────────────────────────────────────────────────────────
+
+export interface SyncResult {
+  inserted: number;
+  updated: number;
+  skipped: number;
+  errors: string[];
+  lastSync: Date;
+}
+
+let lastSyncResult: SyncResult | null = null;
+export function getLastSyncResult() { return lastSyncResult; }
+
+// ── Sincronização principal ───────────────────────────────────────────────────
+
+export async function syncFromGoogleSheets(): Promise<SyncResult> {
+  console.log("[Sheets Sync] 🔄 Iniciando sincronização...");
+
+  const result: SyncResult = { inserted: 0, updated: 0, skipped: 0, errors: [], lastSync: new Date() };
+
+  try {
+    const res = await fetch(getSheetCsvUrl(SHEET_ID), {
+      headers: { "User-Agent": "Mozilla/5.0" },
+      signal: AbortSignal.timeout(30000),
+    });
+
+    if (!res.ok) {
+      if (res.status === 403) {
+        result.errors.push("Planilha não está pública. Acesse Compartilhar → Qualquer pessoa com o link → Leitor.");
+      } else {
+        result.errors.push(`Erro HTTP ${res.status} ao acessar planilha.`);
+      }
+      lastSyncResult = result;
+      return result;
+    }
+
+    const csv = await res.text();
+    const rows = parseCsv(csv);
+    console.log(`[Sheets Sync] 📊 ${rows.length} linhas na planilha`);
+
+    for (let i = 0; i < rows.length; i++) {
+      try {
+        const row = rows[i];
+
+        // Colunas reais da planilha
+        const name    = getCol(row, "NOME", "nome");
+        const cpfRaw  = getCol(row, "CPF", "cpf");
+        const phoneRaw= getCol(row, "TELEFONE", "telefone", "fone", "celular");
+        const proposta= getCol(row, "PROPOSTA", "proposta");
+        const banco   = getCol(row, "BANCO", "banco");
+        const statusRaw = getCol(row, "STATUS", "status", "situacao", "SITUAÇÃO");
+        const obs     = getCol(row, "OBS", "obs", "observacao", "OBSERVAÇÕES");
+
+        // Pula linha sem nome
+        if (!name || name.length < 2) { result.skipped++; continue; }
+
+        // Mapeia status — ignora REPROVADA, CANCELADA, etc.
+        const status = mapStatus(statusRaw);
+        if (!status) { result.skipped++; continue; }
+
+        const phone     = cleanPhone(phoneRaw);
+        const cpf       = cleanCpf(cpfRaw);
+        const gender    = detectGender(name);
+        const returnDate = obs ? extractDate(obs) : null;
+        const formLink  = obs ? extractLink(obs) : null;
+
+        // Pula se não tem telefone (não tem como enviar mensagem)
+        if (!phone) { result.skipped++; continue; }
+
+        const data: any = {
+          name,
+          phone,
+          cpf: cpf || null,
+          proposta: proposta || null,
+          banco: banco || null,
+          status,
+          gender,
+          expectedReturnDate: returnDate || null,
+          notes: obs || null,
+          formalizacaoLink: formLink || null,
+          updatedAt: new Date(),
+        };
+
+        // Upsert: tenta por CPF primeiro, depois por telefone
+        let existingId: number | null = null;
+
+        if (cpf && cpf.length === 11) {
+          const found = await db.select({ id: clients.id }).from(clients).where(eq(clients.cpf, cpf)).limit(1);
+          if (found.length > 0) existingId = found[0].id;
+        }
+
+        if (!existingId && phone) {
+          const found = await db.select({ id: clients.id }).from(clients).where(eq(clients.phone, phone)).limit(1);
+          if (found.length > 0) existingId = found[0].id;
+        }
+
+        if (existingId) {
+          // Preserva flags que operador marcou manualmente
+          const [cur] = await db.select().from(clients).where(eq(clients.id, existingId)).limit(1);
+          const upd: any = { ...data };
+          if (cur?.formalizacaoConcluida) delete upd.formalizacaoConcluida;
+          if (cur?.desbloqueoConcluido)   delete upd.desbloqueoConcluido;
+          if (cur?.hasReplied)            delete upd.hasReplied;
+          await db.update(clients).set(upd).where(eq(clients.id, existingId));
+          result.updated++;
+        } else {
+          await db.insert(clients).values({
+            ...data,
+            active: true,
+            formalizacaoConcluida: false,
+            desbloqueoConcluido: false,
+            hasReplied: false,
+            createdAt: new Date(),
+          });
+          result.inserted++;
+        }
+      } catch (err: any) {
+        result.errors.push(`Linha ${i + 2}: ${err.message}`);
+      }
+    }
+
+    console.log(`[Sheets Sync] ✅ Novo: ${result.inserted} | Atualizado: ${result.updated} | Ignorado: ${result.skipped} | Erro: ${result.errors.length}`);
+  } catch (err: any) {
+    result.errors.push(`Erro geral: ${err.message}`);
+    console.error("[Sheets Sync] ❌", err.message);
+  }
+
+  lastSyncResult = result;
+  return result;
+}
