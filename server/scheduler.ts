@@ -45,8 +45,9 @@ async function saveLog(data: {
   });
 }
 
+// ── Disparos normais: 9h e 15h (apenas clientes com retorno > 0 dias) ────────
 export async function dispatchPeriod(
-  period: "morning" | "noon" | "afternoon"
+  period: "morning" | "afternoon"
 ) {
   if (!isWeekday()) return;
   const today = new Date().toISOString().split("T")[0];
@@ -61,7 +62,9 @@ export async function dispatchPeriod(
 
   for (const c of activeClients) {
     const days = getDaysUntilReturn(c.expectedReturnDate ?? null);
-    if (period === "noon" && days <= 7) continue; // meio-dia só fase inicial
+
+    // No dia do retorno (days <= 0): NÃO dispara aqui — será tratado pelo retorno_1h
+    if (days <= 0) continue;
 
     const key = `${today}_${period}_c${c.id}`;
     if (await alreadySent(key)) continue;
@@ -82,6 +85,56 @@ export async function dispatchPeriod(
   console.log(`[Scheduler] Concluído: ${period}`);
 }
 
+// ── Disparo do dia do retorno: a cada 1h das 9h às 17h ───────────────────────
+// Substitui os disparos normais quando days === 0
+// Para automaticamente quando o cliente marcar que desbloqueou (hasReplied = true)
+export async function dispatchRetornoDia() {
+  if (!isWeekday()) return;
+  const now = new Date();
+  const h = now.getHours();
+  if (h < 9 || h >= 17) return;
+
+  const today = now.toISOString().split("T")[0];
+  const hStr = String(h).padStart(2, "0");
+
+  console.log(`[Scheduler] Disparando: retorno_1h — ${today} ${hStr}h`);
+
+  const activeClients = await db
+    .select()
+    .from(clients)
+    .where(
+      and(eq(clients.active, true), eq(clients.status, "aguarda_retorno_saldo"))
+    );
+
+  for (const c of activeClients) {
+    const days = getDaysUntilReturn(c.expectedReturnDate ?? null);
+
+    // Só dispara no dia do retorno (days === 0)
+    if (days !== 0) continue;
+
+    // Para automaticamente se cliente já confirmou desbloqueio
+    if (c.hasReplied) continue;
+
+    const key = `${today}_retorno_1h_${hStr}_c${c.id}`;
+    if (await alreadySent(key)) continue;
+
+    const msg = buildMessage("retorno_1h", c, 0);
+    const result = await sendWhatsAppMessage(c.phone || "", msg);
+    await saveLog({
+      clientId: c.id,
+      phone: c.phone || "",
+      message: msg,
+      messageType: "retorno_1h",
+      dispatchKey: key,
+      success: result.success,
+      error: result.error,
+      days: 0,
+    });
+  }
+  console.log(`[Scheduler] Concluído: retorno_1h`);
+}
+
+// ── Formalização a cada 1h (8h–18h) ─────────────────────────────────────────
 export async function dispatchFormalizacao() {
   if (!isWeekday()) return;
   const now = new Date();
@@ -111,6 +164,7 @@ export async function dispatchFormalizacao() {
   }
 }
 
+// ── Desbloqueio a cada 1h (8h–18h) ──────────────────────────────────────────
 export async function dispatchDesbloqueio() {
   if (!isWeekday()) return;
   const now = new Date();
@@ -140,6 +194,7 @@ export async function dispatchDesbloqueio() {
   }
 }
 
+// ── Relatório diário (20h) ───────────────────────────────────────────────────
 async function sendDailyReport() {
   if (!isWeekday()) return;
   const today = new Date();
@@ -168,22 +223,29 @@ async function sendDailyReport() {
   await sendWhatsAppMessage(phone, msg);
 }
 
+// ── Iniciar todos os cron jobs ───────────────────────────────────────────────
 export function startScheduler() {
   console.log("[Scheduler] 🚀 Iniciando cron jobs (America/Sao_Paulo)...");
 
+  // Disparos normais: 9h e 15h (apenas clientes com retorno > 0 dias)
   cron.schedule("0 9 * * 1-5", () => dispatchPeriod("morning"), { timezone: "America/Sao_Paulo" });
-  cron.schedule("0 12 * * 1-5", () => dispatchPeriod("noon"), { timezone: "America/Sao_Paulo" });
   cron.schedule("0 15 * * 1-5", () => dispatchPeriod("afternoon"), { timezone: "America/Sao_Paulo" });
+
+  // Dia do retorno: a cada 1h das 9h às 17h
+  cron.schedule("0 9-17 * * 1-5", () => dispatchRetornoDia(), { timezone: "America/Sao_Paulo" });
+
+  // Formalização e desbloqueio: a cada 1h das 8h às 18h
   cron.schedule("0 8-18 * * 1-5", () => { dispatchFormalizacao(); dispatchDesbloqueio(); }, { timezone: "America/Sao_Paulo" });
+
+  // Relatório diário: 20h
   cron.schedule("0 20 * * 1-5", () => sendDailyReport(), { timezone: "America/Sao_Paulo" });
 
-  // A cada 30 minutos — sincronizar Google Sheets
-  cron.schedule("*/30 * * * *", () => syncFromGoogleSheets(), {
-    timezone: "America/Sao_Paulo",
-  });
+  // Sync Google Sheets a cada 30min
+  cron.schedule("*/30 * * * *", () => syncFromGoogleSheets(), { timezone: "America/Sao_Paulo" });
 
-  // Sync imediato ao iniciar o servidor
+  // Sync imediato ao iniciar
   setTimeout(() => syncFromGoogleSheets(), 5000);
 
-  console.log("[Scheduler] ✅ Todos os cron jobs registrados (incluindo sync Google Sheets a cada 30min)");
+  console.log("[Scheduler] ✅ Todos os cron jobs registrados.");
+  console.log("[Scheduler] 📋 Rotina do dia do retorno: a cada 1h das 9h às 17h.");
 }
