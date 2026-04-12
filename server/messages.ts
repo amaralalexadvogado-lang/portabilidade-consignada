@@ -12,6 +12,10 @@ const FEMININE_NAMES = new Set([
   "luana","tamara","flavia","gisele","michele","michelle","caroline","carolyne",
   "thais","thaisa","thaise","suzana","susana","solange","sheila","selma",
   "rejane","rebeca","raissa","rafaela","rafaella","paula","paola","paloma",
+  "elisangela","elisabete","elizabete","elizete","marileni","maristela",
+  "natalina","cecilia","gilvania","gilvania","vanessa","rosana","simoni",
+  "judite","sonia","silvia","viviane","arlete","lucinda","therezinha",
+  "elesandra","eliane","gildete","valquiria","soraia","celia","valdete",
 ]);
 
 export function detectGender(name: string): "M" | "F" {
@@ -35,8 +39,8 @@ export function getDaysUntilReturn(date: Date | null | undefined): number {
 
 type Period =
   | "morning"
-  | "noon"
   | "afternoon"
+  | "retorno_1h"       // NOVO: disparo a cada 1h no dia do retorno
   | "formalizacao_1h"
   | "desbloqueio_1h";
 
@@ -95,22 +99,23 @@ export function buildMessage(
     ].join("\n");
   }
 
-  // ── Dia do retorno (0 dias) ──────────────────────────────
-  if (days <= 0) {
+  // ── Dia do retorno — disparo a cada 1h (9h–17h) ─────────
+  if (period === "retorno_1h") {
     return [
-      `Bom dia ${titulo}, que Deus abençoe você e sua família. 🙏`,
+      `Olá ${titulo}, que Deus abençoe você e sua família. 🙏`,
       "",
       `*Hoje é o dia do retorno do seu saldo!* 🎉`,
       "",
       `Proposta ${prop} no banco ${banco} — estamos acompanhando tudo em tempo real.`,
       "",
-      `Por favor, fique disponível e em um local com sinal. Você terá apenas *2 horas para assinar* após o retorno.`,
+      `Precisamos saber: *você já desbloqueou o seu benefício?*`,
       "",
-      `Se precisar, tenha um familiar por perto para te ajudar.`,
+      `• ✅ Se já desbloqueou — nos avise agora para seguirmos com a formalização!`,
+      `• ❓ Se ainda não sabe como fazer — *nosso time pode fazer uma videochamada com você agora* para te ajudar passo a passo. É só pedir!`,
       "",
-      `⚠️ *NÃO atenda ligações desconhecidas* e *NÃO aceite nada do banco*. Eles tentarão te convencer a ficar — não caia nessa.`,
+      `⚠️ *NÃO atenda ligações desconhecidas* e *NÃO aceite nada do banco atual.* Eles tentarão te convencer a ficar — não caia nessa.`,
       "",
-      `Estamos com você. Fique com Deus! 🙏`,
+      `*Você tem apenas 2 horas após o retorno para assinar.* Estamos aqui com você! Fique com Deus. 🙏`,
     ].join("\n");
   }
 
@@ -183,22 +188,6 @@ export function buildMessage(
       `*NÃO atenda ligações de números desconhecidos.* Quando precisarmos ligar para você, avisaremos com antecedência.`,
       "",
       `Fique com Deus e tenha um dia abençoado. 🙏`,
-    ].join("\n");
-  }
-
-  if (period === "noon") {
-    return [
-      `Olá ${titulo}, espero que seu dia esteja abençoado e cheio da presença de Deus. 🌟`,
-      "",
-      `Estamos entrando em contato novamente sobre a sua portabilidade *Crédito Já*, proposta ${prop} no banco ${banco}.`,
-      "",
-      `Ainda não temos retorno do banco — isso é normal, o processo leva de 5 a 7 dias úteis.`,
-      "",
-      `⚠️ *Muito importante:* NÃO tente fazer portabilidade em outro lugar. O seu processo já está em andamento conosco e qualquer movimentação em outro banco pode *bloquear o seu benefício* e cancelar a sua operação.`,
-      "",
-      `Se o banco ligar oferecendo condições melhores, diga NÃO. Eles só querem manter você pagando juros mais altos.`,
-      "",
-      `Que Deus abençoe você e sua família. 🙏`,
     ].join("\n");
   }
 
