@@ -108,4 +108,17 @@ export function msgNumeroErrado(client: ClientData): string {
 }
 
 export function msgDesbloqueioConfirmado(client: ClientData): string {
-  const g = client.gender || detectGender(client.
+  const g = client.gender || detectGender(client.name);
+  const firstName = client.name.trim().split(/\s+/)[0];
+  const titulo = g === "F" ? `Sra. ${firstName}` : `Sr. ${firstName}`;
+  const link = (client as any).formalizacaoLink;
+  return `Ótimo ${titulo}! 🎉 Desbloqueio confirmado.\n\n` +
+    (link ? `Agora acesse o link para assinar:\n${link}\n\nFique com Deus. 🙏` : `Em breve o vendedor entrará em contato. Fique com Deus. 🙏`);
+}
+
+export function msgFormalizacaoConfirmada(client: ClientData): string {
+  const g = client.gender || detectGender(client.name);
+  const firstName = client.name.trim().split(/\s+/)[0];
+  const titulo = g === "F" ? `Sra. ${firstName}` : `Sr. ${firstName}`;
+  return `Perfeito ${titulo}! ✅ Formalização confirmada.\n\nEm breve nossa equipe entrará em contato para os próximos passos.\n\nFique com Deus. 🙏`;
+}
