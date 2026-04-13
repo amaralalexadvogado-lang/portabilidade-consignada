@@ -1,11 +1,11 @@
 import * as dotenv from "dotenv";
 dotenv.config();
 
-const INSTANCE_ID  = "3F170921AB24A08773D89ED390C0144C";
-const TOKEN        = "D69E92226EAEA0D710827FA4";
-const CLIENT_TOKEN = "pn_fVCtCCZUE4t8cmATvqG9eUql6oOsm7MMeTmF5ItOg4";
+const INSTANCE_ID  = process.env.ZAPI_INSTANCE_ID  || "3F0F77FB7F735150F1D5BA665B49BD70";
+const TOKEN        = process.env.ZAPI_TOKEN         || "D69E92226EAEA0D710827FA4";
+const CLIENT_TOKEN = process.env.ZAPI_CLIENT_TOKEN  || "F11cb8ecb6d934af1a2d2f801b86b00fdS";
 const BASE_URL     = `https://api.z-api.io/instances/${INSTANCE_ID}/token/${TOKEN}`;
-const TEST_PHONE   = process.env.TEST_PHONE || "5511952756127";
+const TEST_PHONE   = process.env.TEST_PHONE         || "5511952756127";
 
 function formatPhone(phone: string): string {
   const digits = phone.replace(/\D/g, "");
@@ -50,4 +50,3 @@ export async function testConnection(): Promise<{ success: boolean; message: str
       ? `Enviado! ID: ${result.messageId}`
       : `Falha: ${result.error}`,
   };
-}
