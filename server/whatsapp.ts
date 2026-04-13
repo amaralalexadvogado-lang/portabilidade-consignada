@@ -1,58 +1,53 @@
 import * as dotenv from "dotenv";
 dotenv.config();
 
-const BASE_URL   = process.env.VENDITORE_BASE_URL   || "https://api.wts.chat";
-const TOKEN      = process.env.VENDITORE_TOKEN      || "";
-const CHANNEL_ID = process.env.VENDITORE_CHANNEL_ID || "";
-const TEST_PHONE = process.env.TEST_PHONE           || "5511952756127";
+const INSTANCE_ID  = "3F170921AB24A08773D89ED390C0144C";
+const TOKEN        = "D69E92226EAEA0D710827FA4";
+const CLIENT_TOKEN = "pn_fVCtCCZUE4t8cmATvqG9eUql6oOsm7MMeTmF5ItOg4";
+const BASE_URL     = `https://api.z-api.io/instances/${INSTANCE_ID}/token/${TOKEN}`;
+const TEST_PHONE   = process.env.TEST_PHONE || "5511952756127";
 
 function formatPhone(phone: string): string {
-  const d = phone.replace(/\D/g, "");
-  return d.startsWith("55") ? d : `55${d}`;
+  const digits = phone.replace(/\D/g, "");
+  return digits.startsWith("55") ? digits : "55" + digits;
 }
 
-async function attempt(phone: string, message: string): Promise<any> {
+export async function sendWhatsAppMessage(
+  phone: string,
+  message: string
+): Promise<{ success: boolean; messageId?: string; error?: string }> {
   const formatted = formatPhone(phone);
-  const payload = { channelId: CHANNEL_ID, phone: formatted, message, text: message };
-  const headers = { "Content-Type": "application/json", "Authorization": `Bearer ${TOKEN}` };
-  for (const endpoint of ["/v1/message/send-text", "/message/send-text"]) {
-    const res = await fetch(`${BASE_URL}${endpoint}`, { method: "POST", headers, body: JSON.stringify(payload) });
-    if (res.ok) {
-      const data = await res.json() as any;
-      console.log(`[Venditore] ✅ Enviado → ${formatted}`);
-      return { success: true, messageId: data?.id || data?.messageId || "ok" };
-    }
-    if (res.status !== 404) {
-      const err = await res.text();
-      throw new Error(`${res.status}: ${err}`);
-    }
-  }
-  throw new Error("Endpoint não encontrado na Venditore");
-}
-
-export async function sendWhatsAppMessage(phone: string, message: string): Promise<{ success: boolean; messageId?: string; error?: string }> {
-  if (!TOKEN)      return { success: false, error: "VENDITORE_TOKEN não configurado" };
-  if (!CHANNEL_ID) return { success: false, error: "VENDITORE_CHANNEL_ID não configurado" };
   try {
-    return await attempt(phone, message);
-  } catch (err: any) {
-    console.warn(`[Venditore] ⚠️ Falha, retentando em 3s → ${phone}: ${err.message}`);
-    await new Promise(r => setTimeout(r, 3000));
-    try {
-      const result = await attempt(phone, message);
-      console.log(`[Venditore] 🔁 Retry OK → ${phone}`);
-      return result;
-    } catch (err2: any) {
-      console.error(`[Venditore] ❌ Falha final → ${phone}: ${err2.message}`);
-      return { success: false, error: err2.message };
+    const res = await fetch(`${BASE_URL}/send-text`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Client-Token": CLIENT_TOKEN,
+      },
+      body: JSON.stringify({ phone: formatted, message }),
+    });
+    const data = (await res.json()) as any;
+    if (res.ok && data.zaapId) {
+      console.log(`[Z-API] ✅ Enviado → ${formatted} | ID: ${data.zaapId}`);
+      return { success: true, messageId: data.zaapId };
     }
+    console.error(`[Z-API] ❌ Erro → ${formatted}:`, data);
+    return { success: false, error: data.message || JSON.stringify(data) };
+  } catch (err: any) {
+    console.error(`[Z-API] ❌ Rede:`, err.message);
+    return { success: false, error: err.message };
   }
 }
 
 export async function testConnection(): Promise<{ success: boolean; message: string }> {
-  const result = await sendWhatsAppMessage(TEST_PHONE, "✅ *Conexão Venditore OK!*\nSistema Crédito Já funcionando. 🙏");
+  const result = await sendWhatsAppMessage(
+    TEST_PHONE,
+    "✅ *Conexão OK!*\nSistema Crédito Já funcionando. 🙏"
+  );
   return {
     success: result.success,
-    message: result.success ? `Enviado para ${TEST_PHONE}! ID: ${result.messageId}` : `Falha: ${result.error}`,
+    message: result.success
+      ? `Enviado! ID: ${result.messageId}`
+      : `Falha: ${result.error}`,
   };
 }
