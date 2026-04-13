@@ -1,4 +1,4 @@
-typescript// server/sheets-sync.ts
+// server/sheets-sync.ts
 import { db } from "./db.js";
 import { clients } from "../drizzle/schema.js";
 import { eq } from "drizzle-orm";
@@ -37,9 +37,9 @@ function cleanCpf(raw: string): string {
 
 function mapStatus(raw: string): string | null {
   const v = norm(raw);
-  if (v.includes("aguardaretorno") || v.includes("aguardapagamento") || v.includes("aguardaaverbacao") || v.includes("aguardaaverba")) return "aguarda_retorno_saldo";
-  if (v.includes("aguardadesbloqueio") || v.includes("pendeliberacao") || v.includes("penliberacao")) return "aguarda_desbloqueio";
-  if (v.includes("pendentedeformalizacao") || v.includes("pendenteformalizacao") || v.includes("pendeformaliz") || v.includes("pendentedefinalizacao")) return "pendente_formalizacao";
+  if (v.includes("aguardaretorno") || v.includes("aguardapagamento") || v.includes("aguardaaverbaçao") || v.includes("aguardaaverbacao")) return "aguarda_retorno_saldo";
+  if (v.includes("aguardadesbloqueio")) return "aguarda_desbloqueio";
+  if (v.includes("pendentedeformalizaçao") || v.includes("pendenteformalizacao") || v.includes("pendentedeformaliz")) return "pendente_formalizacao";
   if (v === "pago" || v.includes("aprovad")) return "aprovado";
   if (v.includes("reprovad") || v.includes("cancelad") || v.includes("naoencont") || v === "-" || v === "") return null;
   return null;
@@ -129,7 +129,7 @@ export async function syncFromGoogleSheets(): Promise<SyncResult> {
 
         const name      = getCol(row, "NOME", "nome");
         const cpfRaw    = getCol(row, "CPF", "cpf");
-        const phoneRaw  = getCol(row, "TELEFONE", "telefone", "fone", "celular", "whatsapp");
+        const phoneRaw  = getCol(row, "TELEFONE", "telefone", "fone", "celular");
         const proposta  = getCol(row, "PROPOSTA", "proposta");
         const banco     = getCol(row, "BANCO", "banco");
         const statusRaw = getCol(row, "STATUS", "status", "situacao", "SITUAÇÃO");
