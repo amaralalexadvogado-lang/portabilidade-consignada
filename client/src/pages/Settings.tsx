@@ -29,7 +29,6 @@ export default function Settings() {
   const setConfig = trpc.setConfig.useMutation();
   const testZAPI = trpc.testZAPI.useMutation();
   const syncSheets = trpc.syncSheets.useMutation();
-
   const [reportPhone, setReportPhone] = useState("");
   const [saving, setSaving] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
@@ -86,12 +85,10 @@ export default function Settings() {
           <RefreshCw className="w-4 h-4 text-primary" />
           <h2 className="text-base font-semibold text-foreground">Sincronização com Google Sheets</h2>
         </div>
-
         <div className="bg-secondary rounded-lg p-3 space-y-1">
           <p className="text-xs text-muted-foreground">ID da planilha</p>
           <p className="text-sm font-mono text-foreground break-all">1QZNIROr-CG3d61sZQnGefDZ9D4yLVfMiuOsHi_jk_58</p>
         </div>
-
         <div className="grid grid-cols-2 gap-3 text-sm">
           <div className="bg-secondary rounded-lg p-3">
             <p className="text-xs text-muted-foreground mb-1">Frequência automática</p>
@@ -104,7 +101,6 @@ export default function Settings() {
             </p>
           </div>
         </div>
-
         {lastSync && (
           <div className="flex gap-3 text-sm">
             <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-500/10 text-green-400 border border-green-500/20">
@@ -123,7 +119,6 @@ export default function Settings() {
             )}
           </div>
         )}
-
         {lastSync?.errors?.length > 0 && (
           <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3">
             {lastSync.errors.map((e: string, i: number) => (
@@ -131,7 +126,6 @@ export default function Settings() {
             ))}
           </div>
         )}
-
         <button
           onClick={handleSync}
           disabled={syncSheets.isPending}
@@ -140,7 +134,6 @@ export default function Settings() {
           {syncSheets.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
           Sincronizar Agora
         </button>
-
         {syncResult && (
           <div className={`px-4 py-3 rounded-lg text-sm border ${
             syncResult.errors?.length === 0
@@ -153,7 +146,6 @@ export default function Settings() {
             }
           </div>
         )}
-
         <p className="text-xs text-muted-foreground">
           Para funcionar, a planilha precisa estar compartilhada como <strong className="text-foreground">pública para leitura</strong> no Google Sheets (Compartilhar → Qualquer pessoa com o link → Leitor).
         </p>
@@ -165,7 +157,6 @@ export default function Settings() {
           <Wifi className="w-4 h-4 text-primary" />
           <h2 className="text-base font-semibold text-foreground">Credenciais Z-API</h2>
         </div>
-
         <div className="grid gap-3">
           <div className="bg-secondary rounded-lg p-3">
             <p className="text-xs text-muted-foreground mb-1">Instance ID</p>
@@ -173,14 +164,13 @@ export default function Settings() {
           </div>
           <div className="bg-secondary rounded-lg p-3">
             <p className="text-xs text-muted-foreground mb-1">Token da Instância</p>
-            <p className="text-sm text-foreground font-mono">D69E92226EAEA0D710827FA4</p>
+            <p className="text-sm text-foreground font-mono">2A288B61AECFE7869059FA27</p>
           </div>
           <div className="bg-secondary rounded-lg p-3">
             <p className="text-xs text-muted-foreground mb-1">Client Token</p>
-            <p className="text-sm text-foreground font-mono">Fe21f691315a74cedb7525f665a70d42cS</p>
+            <p className="text-sm text-foreground font-mono">Fd30ad825715b44d8a25f5d591ea5de16S</p>
           </div>
         </div>
-
         <button
           onClick={handleTest}
           disabled={testZAPI.isPending}
@@ -189,7 +179,6 @@ export default function Settings() {
           {testZAPI.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
           Testar Conexão Z-API
         </button>
-
         {testResult && (
           <div className={`flex items-start gap-2 px-4 py-3 rounded-lg text-sm border ${
             testResult.success
