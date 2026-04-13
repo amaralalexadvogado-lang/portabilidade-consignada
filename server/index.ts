@@ -1,6 +1,5 @@
 import * as dotenv from "dotenv";
 dotenv.config();
-
 import * as trpcExpress from "@trpc/server/adapters/express";
 import express from "express";
 import multer from "multer";
@@ -16,6 +15,19 @@ const PORT = Number(process.env.PORT) || 3000;
 
 app.use(express.json({ limit: "10mb" }));
 
+// Webhook Venditore — GET para validação + POST para mensagens
+app.get("/trpc/webhook", (_req, res) => res.status(200).json({ ok: true }));
+app.post("/webhook/venditore", express.json(), async (req, res) => {
+  res.status(200).json({ ok: true });
+  const data = req.body?.data || req.body || {};
+  const phone = data.phone || data.from || data.sender || "";
+  const text  = data.message || data.text || data.body || "";
+  if (phone && text) {
+    const { handleIncomingMessage } = await import("./scheduler.js");
+    handleIncomingMessage(phone, text).catch((e: any) => console.error("[Webhook] Erro:", e.message));
+  }
+});
+
 // tRPC
 app.use(
   "/trpc",
@@ -30,7 +42,6 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 },
 });
-
 app.post("/api/upload", upload.single("file"), async (req, res) => {
   if (!req.file) {
     res.status(400).json({ error: "Nenhum arquivo enviado" });
