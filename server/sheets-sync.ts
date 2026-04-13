@@ -1,18 +1,14 @@
-// server/sheets-sync.ts
-// Sincroniza automaticamente com o Google Sheets a cada 30 minutos
-
+typescript// server/sheets-sync.ts
 import { db } from "./db.js";
 import { clients } from "../drizzle/schema.js";
 import { eq } from "drizzle-orm";
 import { detectGender } from "./messages.js";
 
-const SHEET_ID = process.env.GOOGLE_SHEET_ID || "1QZNIROr-CG3d61sZQnGefDZ9D4yLVfMiuOsHi_jk_58";
+const SHEET_ID = process.env.GOOGLE_SHEET_ID || "1gMk_2DcWchCh8Q9mVtxjdYjzsT-ZzsbSgj1XP0HB578";
 
 function getSheetCsvUrl(sheetId: string) {
   return `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=0`;
 }
-
-// ── Normalização ──────────────────────────────────────────────────────────────
 
 function norm(s: string): string {
   return s.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "").replace(/[\s_\-\.]+/g, "");
@@ -28,42 +24,27 @@ function getCol(row: Record<string, string>, ...keys: string[]): string {
   return "";
 }
 
-// ── Limpeza de telefone ───────────────────────────────────────────────────────
-// Planilha tem formato: (51) 99326-3542 → precisamos de 5551993263542
 function cleanPhone(raw: string): string {
   const d = raw.replace(/\D/g, "");
-  // Remove DDI 55 se já vier
   const local = d.startsWith("55") && d.length > 11 ? d.slice(2) : d;
   if (local.length < 10 || local.length > 11) return "";
   return "55" + local;
 }
 
-// ── Limpeza de CPF ────────────────────────────────────────────────────────────
-// Planilha tem: 403.719.991-20 ou 40371999120 — normaliza para só dígitos
 function cleanCpf(raw: string): string {
   return raw.replace(/\D/g, "").slice(0, 11);
 }
 
-// ── Mapeamento de status ──────────────────────────────────────────────────────
-// Baseado nos valores reais encontrados na planilha
 function mapStatus(raw: string): string | null {
   const v = norm(raw);
-
-  // Statuses que devem receber mensagens automáticas
-  if (v.includes("aguardaretorno") || v.includes("aguardapagamento") || v.includes("aguardaaverbaçao") || v.includes("aguardaaverbacao")) return "aguarda_retorno_saldo";
-  if (v.includes("aguardadesbloqueio")) return "aguarda_desbloqueio";
-  if (v.includes("pendentedeformalizaçao") || v.includes("pendenteformalizacao") || v.includes("pendentedeformaliz")) return "pendente_formalizacao";
+  if (v.includes("aguardaretorno") || v.includes("aguardapagamento") || v.includes("aguardaaverbacao") || v.includes("aguardaaverba")) return "aguarda_retorno_saldo";
+  if (v.includes("aguardadesbloqueio") || v.includes("pendeliberacao") || v.includes("penliberacao")) return "aguarda_desbloqueio";
+  if (v.includes("pendentedeformalizacao") || v.includes("pendenteformalizacao") || v.includes("pendeformaliz") || v.includes("pendentedefinalizacao")) return "pendente_formalizacao";
   if (v === "pago" || v.includes("aprovad")) return "aprovado";
-
-  // Statuses que NÃO devem receber mensagens — ignoramos esses clientes
   if (v.includes("reprovad") || v.includes("cancelad") || v.includes("naoencont") || v === "-" || v === "") return null;
-
-  // Padrão: se não reconheceu, ignora
   return null;
 }
 
-// ── Extração de data de retorno do campo OBS ──────────────────────────────────
-// Formato: "PREVISÃO - 09/04/2026"
 function extractDate(obs: string): Date | null {
   const m = obs.match(/PREVIS[AÃ]O\s*[-–]\s*(\d{2}\/\d{2}\/\d{4})/i);
   if (!m) return null;
@@ -73,22 +54,16 @@ function extractDate(obs: string): Date | null {
   return date;
 }
 
-// ── Extração de link do campo OBS ────────────────────────────────────────────
-// Exemplos reais: https://cliente.app/external/xxx ou https://web.c6consig.com.br/xxx
 function extractLink(obs: string): string | null {
   const m = obs.match(/https?:\/\/[^\s,]+/);
   return m ? m[0] : null;
 }
 
-// ── Parser CSV ────────────────────────────────────────────────────────────────
-
 function parseCsv(text: string): Record<string, string>[] {
   const lines = text.split(/\r?\n/).filter((l) => l.trim());
   if (lines.length < 2) return [];
-
   const headers = splitCsvLine(lines[0]);
   const rows: Record<string, string>[] = [];
-
   for (let i = 1; i < lines.length; i++) {
     const values = splitCsvLine(lines[i]);
     if (values.every((v) => !v.trim())) continue;
@@ -112,8 +87,6 @@ function splitCsvLine(line: string): string[] {
   return result;
 }
 
-// ── Resultado ─────────────────────────────────────────────────────────────────
-
 export interface SyncResult {
   inserted: number;
   updated: number;
@@ -124,8 +97,6 @@ export interface SyncResult {
 
 let lastSyncResult: SyncResult | null = null;
 export function getLastSyncResult() { return lastSyncResult; }
-
-// ── Sincronização principal ───────────────────────────────────────────────────
 
 export async function syncFromGoogleSheets(): Promise<SyncResult> {
   console.log("[Sheets Sync] 🔄 Iniciando sincronização...");
@@ -156,29 +127,26 @@ export async function syncFromGoogleSheets(): Promise<SyncResult> {
       try {
         const row = rows[i];
 
-        // Colunas reais da planilha
-        const name    = getCol(row, "NOME", "nome");
-        const cpfRaw  = getCol(row, "CPF", "cpf");
-        const phoneRaw= getCol(row, "TELEFONE", "telefone", "fone", "celular");
-        const proposta= getCol(row, "PROPOSTA", "proposta");
-        const banco   = getCol(row, "BANCO", "banco");
+        const name      = getCol(row, "NOME", "nome");
+        const cpfRaw    = getCol(row, "CPF", "cpf");
+        const phoneRaw  = getCol(row, "TELEFONE", "telefone", "fone", "celular", "whatsapp");
+        const proposta  = getCol(row, "PROPOSTA", "proposta");
+        const banco     = getCol(row, "BANCO", "banco");
         const statusRaw = getCol(row, "STATUS", "status", "situacao", "SITUAÇÃO");
-        const obs     = getCol(row, "OBS", "obs", "observacao", "OBSERVAÇÕES");
+        const obs       = getCol(row, "OBS", "obs", "observacao", "OBSERVAÇÕES");
+        const vendedor  = getCol(row, "VENDEDOR", "vendedor", "consultor", "atendente");
 
-        // Pula linha sem nome
         if (!name || name.length < 2) { result.skipped++; continue; }
 
-        // Mapeia status — ignora REPROVADA, CANCELADA, etc.
         const status = mapStatus(statusRaw);
         if (!status) { result.skipped++; continue; }
 
-        const phone     = cleanPhone(phoneRaw);
-        const cpf       = cleanCpf(cpfRaw);
-        const gender    = detectGender(name);
+        const phone      = cleanPhone(phoneRaw);
+        const cpf        = cleanCpf(cpfRaw);
+        const gender     = detectGender(name);
         const returnDate = obs ? extractDate(obs) : null;
-        const formLink  = obs ? extractLink(obs) : null;
+        const formLink   = obs ? extractLink(obs) : null;
 
-        // Pula se não tem telefone (não tem como enviar mensagem)
         if (!phone) { result.skipped++; continue; }
 
         const data: any = {
@@ -192,10 +160,10 @@ export async function syncFromGoogleSheets(): Promise<SyncResult> {
           expectedReturnDate: returnDate || null,
           notes: obs || null,
           formalizacaoLink: formLink || null,
+          vendedor: vendedor || null,
           updatedAt: new Date(),
         };
 
-        // Upsert: tenta por CPF primeiro, depois por telefone
         let existingId: number | null = null;
 
         if (cpf && cpf.length === 11) {
@@ -209,7 +177,6 @@ export async function syncFromGoogleSheets(): Promise<SyncResult> {
         }
 
         if (existingId) {
-          // Preserva flags que operador marcou manualmente
           const [cur] = await db.select().from(clients).where(eq(clients.id, existingId)).limit(1);
           const upd: any = { ...data };
           if (cur?.formalizacaoConcluida) delete upd.formalizacaoConcluida;
