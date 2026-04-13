@@ -164,7 +164,7 @@ export default function Settings() {
           </div>
           <div className="bg-secondary rounded-lg p-3">
             <p className="text-xs text-muted-foreground mb-1">Token da Instância</p>
-            <p className="text-sm text-foreground font-mono">2A288B61AECFE7869059FA27</p>
+            <p className="text-sm text-foreground font-mono">D69E92226EAEA0D710827FA4</p>
           </div>
           <div className="bg-secondary rounded-lg p-3">
             <p className="text-xs text-muted-foreground mb-1">Client Token</p>
