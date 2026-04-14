@@ -37,11 +37,22 @@ function cleanCpf(raw: string): string {
 
 function mapStatus(raw: string): string | null {
   const v = norm(raw);
-  if (v.includes("aguardaretorno") || v.includes("aguardapagamento") || v.includes("aguardaaverbaçao") || v.includes("aguardaaverbacao")) return "aguarda_retorno_saldo";
-  if (v.includes("aguardadesbloqueio")) return "aguarda_desbloqueio";
-  if (v.includes("pendentedeformalizaçao") || v.includes("pendenteformalizacao") || v.includes("pendentedeformaliz")) return "pendente_formalizacao";
+
+  // Aguarda retorno de saldo e variações
+  if (v.includes("aguardaretorno") || v.includes("aguardapagamento") || v.includes("aguardaaverbacao") || v.includes("aguardaaverbaçao")) return "aguarda_retorno_saldo";
+
+  // Aguarda desbloqueio — inclui "AGUARDA DESBLOQUEIO DE BEN"
+  if (v.includes("aguardadesbloqueio") || v.includes("desbloqueio")) return "aguarda_desbloqueio";
+
+  // Pendente de formalização
+  if (v.includes("pendentedeformalizacao") || v.includes("pendenteformalizacao") || v.includes("pendentedeformaliz") || v.includes("pendentedocumento") || v.includes("pendentedeemail") || v.includes("pendentedoc") || v.includes("pendenteemail")) return "pendente_formalizacao";
+
+  // Aprovado / pago
   if (v === "pago" || v.includes("aprovad")) return "aprovado";
-  if (v.includes("reprovad") || v.includes("cancelad") || v.includes("naoencont") || v === "-" || v === "") return null;
+
+  // Ignorados
+  if (v.includes("reprovad") || v.includes("cancelad") || v.includes("naoencont") || v.includes("proposta") || v === "-" || v === "") return null;
+
   return null;
 }
 
