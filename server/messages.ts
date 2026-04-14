@@ -11,7 +11,9 @@ const FEMALE_NAMES = new Set([
   "sabrina","selma","sheila","solange","soraia","sueli","suely","suzana","telma","tereza","valdirene",
   "vera","vitoria","wania","walkiria","zelia","zenaide","sonia","aparecida","elza","tatiane",
   "andreia","andrea","jaqueline","silvana","marlene","marli","neusa","neli","leni",
-  "cleide","cleuza","iracema","iraci","lourdes","conceicao","benedita","izabel","dulce","dirce"
+  "cleide","cleuza","iracema","iraci","lourdes","conceicao","benedita","izabel","dulce","dirce",
+  "marileni","maristela","natalina","cecilia","gilvania","simoni","judite","arlete","lucinda",
+  "therezinha","elesandra","gildete","valquiria","soraia","celia","valdete","elisangela","elizete",
 ]);
 
 export type Period =
@@ -111,7 +113,7 @@ export function msgDesbloqueioConfirmado(client: ClientData): string {
   const g = client.gender || detectGender(client.name);
   const firstName = client.name.trim().split(/\s+/)[0];
   const titulo = g === "F" ? `Sra. ${firstName}` : `Sr. ${firstName}`;
-  const link = (client as any).formalizacaoLink;
+  const link = client.formalizacaoLink;
   return `Ótimo ${titulo}! 🎉 Desbloqueio confirmado.\n\n` +
     (link ? `Agora acesse o link para assinar:\n${link}\n\nFique com Deus. 🙏` : `Em breve o vendedor entrará em contato. Fique com Deus. 🙏`);
 }
@@ -121,4 +123,28 @@ export function msgFormalizacaoConfirmada(client: ClientData): string {
   const firstName = client.name.trim().split(/\s+/)[0];
   const titulo = g === "F" ? `Sra. ${firstName}` : `Sr. ${firstName}`;
   return `Perfeito ${titulo}! ✅ Formalização confirmada.\n\nEm breve nossa equipe entrará em contato para os próximos passos.\n\nFique com Deus. 🙏`;
+}
+
+export function msgPersuasao(client: ClientData): string {
+  const g = client.gender || detectGender(client.name);
+  const firstName = client.name.trim().split(/\s+/)[0];
+  const titulo = g === "F" ? `Sra. ${firstName}` : `Sr. ${firstName}`;
+  const prop  = client.proposta ? `*${client.proposta}*` : "*sua proposta*";
+  const banco = client.banco    ? `*${client.banco}*`    : "*o banco*";
+  return [
+    `Olá ${titulo}, entendemos sua posição. 🙏`,
+    ``,
+    `Mas precisamos que saiba: *esta portabilidade já está aprovada e o valor está reservado para você.* Se desistir agora, perderá tudo que foi conquistado até aqui.`,
+    ``,
+    `📋 Proposta ${prop} no banco ${banco}:`,
+    `• ✅ Redução das suas parcelas mensais`,
+    `• ✅ Mais dinheiro no seu bolso todo mês`,
+    `• ✅ Processo 100% seguro e sem custo para você`,
+    ``,
+    `*Não deixe o banco atual te convencer a ficar.* Eles ligam porque sabem que você vai economizar — e isso prejudica os lucros deles, não os seus.`,
+    ``,
+    `Nossa equipe está aqui para te ajudar em cada passo. Podemos fazer uma *videochamada agora* para tirar todas as suas dúvidas. É só pedir! 🙏`,
+    ``,
+    `Fique com Deus. Estamos com você.`,
+  ].join("\n");
 }
