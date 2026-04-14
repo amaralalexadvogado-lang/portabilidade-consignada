@@ -30,6 +30,7 @@ export const clients = mysqlTable("clients", {
   desbloqueoConcluido: boolean("desbloqueoConcluido").default(false),
   hasReplied: boolean("hasReplied").default(false),
   active: boolean("active").default(true),
+  vendedor: varchar("vendedor", { length: 255 }),
   createdAt: datetime("createdAt"),
   updatedAt: datetime("updatedAt"),
 });
