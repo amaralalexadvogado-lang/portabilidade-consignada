@@ -4,7 +4,7 @@ import { clients } from "../drizzle/schema.js";
 import { eq } from "drizzle-orm";
 import { detectGender } from "./messages.js";
 
-const SHEET_ID = process.env.GOOGLE_SHEET_ID || "1gMk_2DcWchCh8Q9mVtxjdYjzsT-ZzsbSgj1XP0HB578";
+const SHEET_ID = process.env.GOOGLE_SHEET_ID || "1QZNIROr-CG3d61sZQnGefDZ9D4yLVfMiuOsHi_jk_58";
 
 function getSheetCsvUrl(sheetId: string) {
   return `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=0`;
