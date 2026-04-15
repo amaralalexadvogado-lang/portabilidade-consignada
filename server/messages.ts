@@ -1,150 +1,241 @@
+import { db } from "./db";
+import { clients, messageLogs } from "../drizzle/schema";
+import { eq } from "drizzle-orm";
+import { sendWhatsAppMessage } from "./whatsapp";
+import { format, differenceInCalendarDays, parseISO } from "date-fns";
+import { toZonedTime } from "date-fns-tz";
+
+const TZ = "America/Sao_Paulo";
+
+// ─── DETECÇÃO DE GÊNERO ───────────────────────────────────────────────────────
 const FEMALE_NAMES = new Set([
-  "ana","maria","julia","juliana","fernanda","patricia","camila","aline","amanda","bruna",
-  "carolina","claudia","cristina","daniela","debora","elaine","elisa","flavia","gabriela",
-  "giovanna","isabela","jessica","joana","karen","larissa","laura","leticia","lucia","luciana",
-  "luiza","marcela","marcia","mariana","marina","michelle","monica","natalia","paula","priscila",
-  "raquel","renata","roberta","sandra","simone","silvia","tatiana","thais","valeria","vanessa",
-  "veronica","viviane","yasmin","alice","beatriz","bianca","cintia","denise","edilaine","edna",
-  "eliane","elisangela","fabiana","fatima","francisca","geovana","helena","ines","irene","janaina",
-  "josefa","katia","luana","lurdes","magda","marta","nadia","nair","nathalia","neuza","noemia",
-  "odete","olivia","regiane","rosa","rosana","rosangela","roseli","rosilene","rosimeire","ruth",
-  "sabrina","selma","sheila","solange","soraia","sueli","suely","suzana","telma","tereza","valdirene",
-  "vera","vitoria","wania","walkiria","zelia","zenaide","sonia","aparecida","elza","tatiane",
-  "andreia","andrea","jaqueline","silvana","marlene","marli","neusa","neli","leni",
-  "cleide","cleuza","iracema","iraci","lourdes","conceicao","benedita","izabel","dulce","dirce",
-  "marileni","maristela","natalina","cecilia","gilvania","simoni","judite","arlete","lucinda",
-  "therezinha","elesandra","gildete","valquiria","soraia","celia","valdete","elisangela","elizete",
+  "MARIA","ANA","FRANCISCA","ANTONIA","ADRIANA","JULIANA","MARCIA","FERNANDA",
+  "PATRICIA","ALINE","SANDRA","CAMILA","AMANDA","BRUNA","JESSICA","LETICIA",
+  "LUCIANA","DANIELA","FABIANA","CLAUDIA","CRISTINA","VANESSA","SIMONE","RENATA",
+  "ANDREA","MONICA","CARLA","ROSANA","HELENA","VERA","LUCIA","ISABEL","RAQUEL",
+  "NATALIA","TATIANA","ELIANE","SILVANA","ROSANGELA","MARGARETE","ELIZABETE",
+  "SUELI","ROSELI","APARECIDA","CONCEICAO","TEREZA","JOSEFA","RAIMUNDA",
+  "BENEDITA","ANGELICA","VIVIANE","PRISCILA","DEBORA","LILIAN","ELISANGELA",
+  "MARILENE","FATIMA","SOLANGE","MARINEIDE","EDNEIA","CELIA","NEUZA","IRENE",
+  "ROSEMEIRE","NILZA","NOEMIA","MARLENE","MARLI","MARISTELA","MARINETE",
+  "ELZA","ELSA","DILVANA","DILVANE","SUZEL","SUZELAINE","IVONE","IVONETE",
+  "IVANETE","IRACEMA","BERNADETE","BEATRIZ","BIANCA","BARBARA","ALICE",
+  "ALESSANDRA","ALICIA","ALBA","FLAVIA","FLAVIANA","GLEICE","GLEICIANE",
+  "GISLAINE","GISELE","GISELA","GISLENE","GRACIELA","GRACIETE","GRACIELE",
+  "ROSILDA","ROSILEIDE","ROSILEIA","ROSILENE","ROSIMEIRE","SILVIA","SILVANA",
+  "SIRLENE","SIRLEI","NELI","NELIA","NELY","NEIDE","NILCEIA","MARLY","MARLENE",
+  "DAIANE","DAIANA","SUZAN","SUZANA","SUZANE","JAQUELINE","JACQUELINE",
+  "VIVIANE","ROSEMEIRE","ROSEMARY","MAGDA","MAGDALENA","ODETE","VILMA",
+  "CECILIA","TEREZINHA","TEREZA","ADELIA","ADELINA","GLEICIANE","MARILEI",
+  "TATIANA","TANIA","TÂNIA","TAIANE","TAIANA","TAMIRIS","TAMIRES",
+  "KEILA","KEILLA","KEILLE","KEILANE","KEILANI","KEILANNE",
+  "ROSANIA","ROSANEA","ROSANE","ROSANI","ROSANY","ROSANIA",
+  "VALÉRIA","VALERIA","VALESCA","VALESCA","VALESKA",
+  "WANESSA","VANESSA","VANESA","VANESSE",
+  "ZENAIDE","ZENAIDA","ZENILDA","ZENILDES",
 ]);
 
-export type Period =
-  | "morning"
-  | "afternoon"
-  | "retorno_1h"
-  | "formalizacao_1h"
-  | "desbloqueio_1h";
-
-export interface ClientData {
-  name: string;
-  gender?: "M" | "F" | null;
-  proposta?: string | null;
-  banco?: string | null;
-  formalizacaoLink?: string | null;
-  vendedor?: string | null;
+function getGender(name: string): "Sr." | "Sra." {
+  const first = name
+    .trim()
+    .split(/\s+/)[0]
+    .toUpperCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  if (FEMALE_NAMES.has(first)) return "Sra.";
+  // Nomes terminados em A geralmente são femininos (exceto exceções)
+  const masculineEndingA = new Set(["LUA","JOSUA","NIKITA","LUCA","ELIA","EZRA"]);
+  if (first.endsWith("A") && !masculineEndingA.has(first)) return "Sra.";
+  return "Sr.";
 }
 
-export function detectGender(name: string): "M" | "F" {
-  const first = name.trim().split(/\s+/)[0].toLowerCase()
-    .normalize("NFD").replace(/\p{M}/gu, "");
-  return FEMALE_NAMES.has(first) ? "F" : "M";
+function firstName(name: string): string {
+  return name.trim().split(/\s+/)[0];
 }
 
-export function getDaysUntilReturn(date: Date | null | undefined): number {
-  if (!date) return 999;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const ret = new Date(date);
-  ret.setHours(0, 0, 0, 0);
-  return Math.ceil((ret.getTime() - today.getTime()) / 86400000);
+function daysUntil(returnDate: Date | string | null | undefined): number {
+  if (!returnDate) return 999;
+  try {
+    const now = toZonedTime(new Date(), TZ);
+    const ret = typeof returnDate === "string" ? parseISO(returnDate) : returnDate;
+    return differenceInCalendarDays(ret, now);
+  } catch {
+    return 999;
+  }
 }
 
-function saudacao(client: ClientData, cumprimento: string): string {
-  const g = client.gender || detectGender(client.name);
-  const firstName = client.name.trim().split(/\s+/)[0];
-  const titulo = g === "F" ? `Sra. ${firstName}` : `Sr. ${firstName}`;
-  const vend = client.vendedor ? ` com *${client.vendedor}*` : "";
-  return `${cumprimento} ${titulo}, que Deus abençoe seu dia e de sua família. 🙏\n\nSou da equipe da *Crédito Já*, referente à portabilidade realizada${vend}.`;
-}
+// ─── TEMPLATES DE MENSAGEM ────────────────────────────────────────────────────
+function buildMessage(
+  client: {
+    name: string;
+    proposta?: string | null;
+    banco?: string | null;
+    expectedReturnDate?: Date | string | null;
+    operatorName?: string | null;
+  },
+  period: "morning" | "noon" | "afternoon",
+  days: number
+): string {
+  const title = getGender(client.name);
+  const first = firstName(client.name);
+  const proposta = client.proposta || "—";
+  const banco = client.banco || "—";
+  const operador = client.operatorName
+    ? `\n\nSua operação foi fechada pelo corretor *${client.operatorName}*.`
+    : "";
 
-export function buildMessage(period: Period, client: ClientData, days: number): string {
-  const prop  = client.proposta ? `*${client.proposta}*` : "*sua proposta*";
-  const banco = client.banco    ? `*${client.banco}*`    : "*o banco*";
+  const greet =
+    period === "morning" ? "Bom dia" : "Boa tarde";
 
-  if (period === "formalizacao_1h") {
-    const link = client.formalizacaoLink ? `\nAcesse o link abaixo para assinar agora:\n${client.formalizacaoLink}\n` : "";
-    return [saudacao(client, "Olá"),"",`*Você ainda não formalizou a sua portabilidade Crédito Já.* Faça o quanto antes para não perder o valor liberado.`,"",`📋 Proposta: ${prop} | Banco: ${banco}`,link,`⚠️ *Não deixe para depois* — o prazo é limitado e o valor pode ser cancelado.`,"",`Estamos aqui para te ajudar. Fique com Deus. 🙏`].join("\n");
+  // Dia do retorno (hoje)
+  if (days === 0) {
+    return `${greet} ${title} ${first}, que Deus abençoe seu dia e de sua família. 🙏
+
+Sou da equipe da *Crédito Já*, referente à portabilidade realizada.${operador}
+
+🎉 *Hoje é o dia do retorno do seu saldo!* Proposta *${proposta}* no banco *${banco}*.
+
+Assim que o saldo retornar, entraremos em contato imediatamente para finalizar sua portabilidade.
+
+⚠️ *Não tente fazer portabilidade em outro lugar.* Qualquer tentativa em outro banco pode *bloquear o seu benefício*.
+
+*NÃO atenda ligações desconhecidas* e não aceite nada do banco.
+
+Fique com Deus. 🙏`;
   }
 
-  if (period === "desbloqueio_1h") {
-    const link = client.formalizacaoLink ? `\nApós desbloquear, acesse o link para assinar: ${client.formalizacaoLink}\n` : "";
-    return [saudacao(client, "Olá"),"",`Estamos acompanhando a proposta ${prop} no banco ${banco}.`,"",`*Você já conseguiu desbloquear o seu benefício?*`,"",`Se ainda não desbloqueou, precisamos que faça isso o quanto antes. Podemos te ajudar passo a passo — é só nos chamar.`,link,`⚠️ *Não tente fazer portabilidade em outro lugar.* Qualquer tentativa em outro banco pode *bloquear o seu benefício* e cancelar a operação.`,"",`Qualquer dúvida, estamos aqui. Fique com Deus. 🙏`].join("\n");
-  }
-
-  if (period === "retorno_1h") {
-    return [saudacao(client, "Olá"),"",`*Hoje é o dia do retorno do seu saldo!* 🎉`,"",`Proposta ${prop} no banco ${banco} — estamos acompanhando tudo em tempo real.`,"",`Precisamos saber: *você já desbloqueou o seu benefício?*`,"",`• ✅ Se já desbloqueou — nos avise agora para seguirmos com a formalização!`,`• ❓ Se ainda não sabe como fazer — *nosso time pode te ajudar agora mesmo.* É só pedir!`,"",`⚠️ *NÃO atenda ligações desconhecidas* e *NÃO aceite nada do banco atual.* Eles tentarão te convencer a ficar — não caia nessa.`,"",`*Você tem apenas 2 horas após o retorno para assinar.* Estamos aqui com você! Fique com Deus. 🙏`].join("\n");
-  }
-
+  // Amanhã é o retorno
   if (days === 1) {
-    return [saudacao(client, "Bom dia"),"",`*Atenção: amanhã é o dia do retorno do seu saldo!* 🎉`,"",`Proposta ${prop} no banco ${banco} — estamos acompanhando tudo de perto.`,"",`Precisamos confirmar: *você já desbloqueou o seu benefício?* Se ainda não desbloqueou, faça hoje mesmo para não perder o prazo.`,"",`Se precisar de ajuda com o desbloqueio, nos chame agora. Se possível, tenha um familiar por perto amanhã para te ajudar.`,"",`⚠️ *Não tente fazer portabilidade em outro lugar.*`,"",`*NÃO atenda ligações desconhecidas* e não aceite nada do banco.`,"",`Estamos com você. Fique com Deus! 🙏`].join("\n");
+    return `${greet} ${title} ${first}, que Deus abençoe seu dia e de sua família. 🙏
+
+Sou da equipe da *Crédito Já*, referente à portabilidade realizada.${operador}
+
+⏰ *Atenção: amanhã é o dia do retorno do seu saldo!* Proposta *${proposta}* no banco *${banco}*.
+
+Fique atento — amanhã entraremos em contato assim que o saldo retornar.
+
+⚠️ *Não tente fazer portabilidade em outro lugar.* Qualquer tentativa em outro banco pode *bloquear o seu benefício*.
+
+*NÃO atenda ligações desconhecidas* e não aceite nada do banco.
+
+Fique com Deus. 🙏`;
   }
 
-  if (days <= 7) {
-    if (period === "morning") {
-      return [saudacao(client, "Bom dia"),"",`Estamos chegando muito perto da data de retorno do seu saldo — *faltam ${days} dia(s)* para a proposta ${prop} no banco ${banco}.`,"",`Precisamos confirmar algo importante: *você sabe como desbloquear o seu benefício?*`,"",`Se tiver alguma dificuldade, nos avise agora para que possamos te ajudar passo a passo.`,"",`⚠️ *Não tente fazer portabilidade em outro lugar.* Qualquer tentativa em outro banco pode *bloquear o seu benefício* e cancelar tudo.`,"",`Fique com Deus, estamos aqui com você. 🙏`].join("\n");
+  // 2 a 5 dias para o retorno
+  if (days >= 2 && days <= 5) {
+    return `${greet} ${title} ${first}, que Deus abençoe seu dia e de sua família. 🙏
+
+Sou da equipe da *Crédito Já*, referente à portabilidade realizada.${operador}
+
+Atualizando você sobre a portabilidade, proposta *${proposta}* no banco *${banco}* — faltam *${days} dia(s)* para o retorno do seu saldo.
+
+Precisamos confirmar: *você já desbloqueou o seu benefício?*
+
+• Se não, você sabe como fazer? Nos fale agora para que possamos te auxiliar.
+• Se sim, nos envie o extrato para confirmarmos.
+
+⚠️ *No dia do retorno, você terá apenas 2 horas para assinar.*
+
+Fique com Deus e conte conosco. 🙏`;
+  }
+
+  // Mais de 5 dias
+  return `${greet} ${title} ${first}, que Deus abençoe seu dia e de sua família. 🙏
+
+Sou da equipe da *Crédito Já*, referente à portabilidade realizada.${operador}
+
+Atualizando você sobre a portabilidade, proposta *${proposta}* no banco *${banco}* — ainda aguardamos retorno do banco, previsão em *${days} dia(s)*.
+
+Amanhã entraremos em contato novamente com mais informações.
+
+⚠️ *Não tente fazer portabilidade em outro lugar.* O processo já está em andamento conosco e qualquer tentativa em outro banco pode *bloquear o seu benefício*.
+
+*NÃO atenda ligações desconhecidas* e não aceite nada do banco.
+
+Tenha um dia abençoado. Fique com Deus. 🙏`;
+}
+
+// ─── ENVIO PRINCIPAL ──────────────────────────────────────────────────────────
+export async function sendScheduledMessages(
+  period: "morning" | "noon" | "afternoon"
+): Promise<{ sent: number; skipped: number; failed: number }> {
+  const now = toZonedTime(new Date(), TZ);
+  const todayStr = format(now, "yyyy-MM-dd");
+
+  const activeClients = await db
+    .select()
+    .from(clients)
+    .where(eq(clients.status, "aguarda_retorno_saldo"));
+
+  let sent = 0, skipped = 0, failed = 0;
+
+  for (const client of activeClients) {
+    // ✅ Pula se não tem telefone
+    if (!client.phone || client.phone.trim() === "") {
+      console.log(`[SKIP] ${client.name} — sem telefone`);
+      skipped++;
+      continue;
     }
-    return [saudacao(client, "Olá"),"",`Atualizando sobre a proposta ${prop} no banco ${banco} — *faltam ${days} dia(s)* para o retorno do seu saldo.`,"",`Precisamos confirmar: *você já desbloqueou o seu benefício?*`,"",`• Se não, você sabe como fazer? Nos fale agora para que possamos te auxiliar.`,`• Se sim, nos envie o extrato para confirmarmos.`,"",`⚠️ *No dia do retorno, você terá apenas 2 horas para assinar.*`,"",`Fique com Deus e conte conosco. 🙏`].join("\n");
+
+    const days = daysUntil(client.expectedReturnDate);
+
+    // Meio-dia: só envia se faltam mais de 7 dias
+    if (period === "noon" && days <= 7) {
+      skipped++;
+      continue;
+    }
+
+    // Chave de deduplicação
+    const key = `${todayStr}_${period}_c${client.id}`;
+
+    // Verifica se já enviou hoje neste período
+    const existing = await db
+      .select()
+      .from(messageLogs)
+      .where(eq(messageLogs.dispatchKey, key))
+      .limit(1);
+
+    if (existing.length > 0) {
+      skipped++;
+      continue;
+    }
+
+    const message = buildMessage(
+      {
+        name: client.name,
+        proposta: client.proposta,
+        banco: client.banco,
+        expectedReturnDate: client.expectedReturnDate,
+        operatorName: client.operatorName,
+      },
+      period,
+      days
+    );
+
+    const result = await sendWhatsAppMessage(client.phone, client.name, message);
+
+    await db.insert(messageLogs).values({
+      clientId: client.id,
+      phone: client.phone,
+      message,
+      messageType: period,
+      dispatchKey: key,
+      status: result.success ? "sent" : "failed",
+      attempts: 1,
+      errorMessage: result.success ? null : (result.error ?? null),
+      daysUntilReturn: days,
+      sentAt: result.success ? new Date() : null,
+      scheduledFor: now,
+    });
+
+    if (result.success) {
+      sent++;
+      console.log(`[SENT] ${client.name} (${client.phone}) — ${days} dias`);
+    } else {
+      failed++;
+      console.log(`[FAIL] ${client.name} — ${result.error}`);
+    }
   }
 
-  if (period === "morning") {
-    return [saudacao(client, "Bom dia"),"",`Estamos acompanhando de perto a sua portabilidade, proposta ${prop} no banco ${banco}.`,"",`Ainda não recebemos retorno do banco, mas o processo está em andamento normalmente.`,"",`⚠️ *Atenção importante:* Não tente fazer portabilidade em outro lugar. O seu processo já está em andamento conosco e qualquer tentativa em outro banco pode *bloquear o seu benefício* e cancelar tudo.`,"",`*NÃO atenda ligações de números desconhecidos.* Quando precisarmos ligar para você, avisaremos com antecedência.`,"",`Fique com Deus e tenha um dia abençoado. 🙏`].join("\n");
-  }
-
-  return [saudacao(client, "Boa tarde"),"",`Atualizando você sobre a portabilidade, proposta ${prop} no banco ${banco} — ainda aguardamos retorno do banco hoje.`,"",`Amanhã entraremos em contato novamente com mais informações.`,"",`⚠️ *Não tente fazer portabilidade em outro lugar.* O processo já está em andamento conosco e qualquer tentativa em outro banco pode *bloquear o seu benefício*.`,"",`*NÃO atenda ligações desconhecidas* e não aceite nada do banco.`,"",`Tenha uma tarde abençoada. Fique com Deus. 🙏`].join("\n");
-}
-
-export function msgTransferirSetor(client: ClientData): string {
-  const g = client.gender || detectGender(client.name);
-  const firstName = client.name.trim().split(/\s+/)[0];
-  const titulo = g === "F" ? `Sra. ${firstName}` : `Sr. ${firstName}`;
-  return `Olá ${titulo}, entendemos que você está com dificuldade. 🙏\n\nVamos transferir você para o setor de formalização que irá te auxiliar no desbloqueio/formalização em breve.\n\nFique com Deus. 🙏`;
-}
-
-export function msgMensagemAutomatica(): string {
-  return `Olá! Esta mensagem é automática. Em breve o vendedor entrará em contato para te atender. 🙏\n\nFique com Deus.`;
-}
-
-export function msgNumeroErrado(client: ClientData): string {
-  const g = client.gender || detectGender(client.name);
-  const firstName = client.name.trim().split(/\s+/)[0];
-  const titulo = g === "F" ? `Sra. ${firstName}` : `Sr. ${firstName}`;
-  return `Olá ${titulo}, pedimos desculpas pelo contato indevido. 🙏\n\nNão entraremos mais em contato com este número.\n\nFique com Deus.`;
-}
-
-export function msgDesbloqueioConfirmado(client: ClientData): string {
-  const g = client.gender || detectGender(client.name);
-  const firstName = client.name.trim().split(/\s+/)[0];
-  const titulo = g === "F" ? `Sra. ${firstName}` : `Sr. ${firstName}`;
-  const link = client.formalizacaoLink;
-  return `Ótimo ${titulo}! 🎉 Desbloqueio confirmado.\n\n` +
-    (link ? `Agora acesse o link para assinar:\n${link}\n\nFique com Deus. 🙏` : `Em breve o vendedor entrará em contato. Fique com Deus. 🙏`);
-}
-
-export function msgFormalizacaoConfirmada(client: ClientData): string {
-  const g = client.gender || detectGender(client.name);
-  const firstName = client.name.trim().split(/\s+/)[0];
-  const titulo = g === "F" ? `Sra. ${firstName}` : `Sr. ${firstName}`;
-  return `Perfeito ${titulo}! ✅ Formalização confirmada.\n\nEm breve nossa equipe entrará em contato para os próximos passos.\n\nFique com Deus. 🙏`;
-}
-
-export function msgPersuasao(client: ClientData): string {
-  const g = client.gender || detectGender(client.name);
-  const firstName = client.name.trim().split(/\s+/)[0];
-  const titulo = g === "F" ? `Sra. ${firstName}` : `Sr. ${firstName}`;
-  const prop  = client.proposta ? `*${client.proposta}*` : "*sua proposta*";
-  const banco = client.banco    ? `*${client.banco}*`    : "*o banco*";
-  return [
-    `Olá ${titulo}, entendemos sua posição. 🙏`,
-    ``,
-    `Mas precisamos que saiba: *esta portabilidade já está aprovada e o valor está reservado para você.* Se desistir agora, perderá tudo que foi conquistado até aqui.`,
-    ``,
-    `📋 Proposta ${prop} no banco ${banco}:`,
-    `• ✅ Redução das suas parcelas mensais`,
-    `• ✅ Mais dinheiro no seu bolso todo mês`,
-    `• ✅ Processo 100% seguro e sem custo para você`,
-    ``,
-    `*Não deixe o banco atual te convencer a ficar.* Eles ligam porque sabem que você vai economizar — e isso prejudica os lucros deles, não os seus.`,
-    ``,
-    `Nossa equipe está aqui para te ajudar em cada passo. Podemos fazer uma *videochamada agora* para tirar todas as suas dúvidas. É só pedir! 🙏`,
-    ``,
-    `Fique com Deus. Estamos com você.`,
-  ].join("\n");
+  return { sent, skipped, failed };
 }
