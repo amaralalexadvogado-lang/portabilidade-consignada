@@ -122,3 +122,10 @@ export function msgFormalizacaoConfirmada(client: ClientData): string {
   const titulo = g === "F" ? `Sra. ${firstName}` : `Sr. ${firstName}`;
   return `Perfeito ${titulo}! ✅ Formalização confirmada.\n\nEm breve nossa equipe entrará em contato para os próximos passos.\n\nFique com Deus. 🙏`;
 }
+
+export function msgPersuasao(client: ClientData): string {
+  const g = client.gender || detectGender(client.name);
+  const firstName = client.name.trim().split(/\s+/)[0];
+  const titulo = g === "F" ? `Sra. ${firstName}` : `Sr. ${firstName}`;
+  return `Olá ${titulo}, entendemos sua preocupação. 🙏\n\nQueremos garantir que você receba o melhor serviço possível. Nossa equipe está totalmente comprometida com a sua portabilidade e faremos tudo para que dê certo.\n\n⚠️ *Importante:* Cancelar agora pode fazer você perder o valor já aprovado. Vamos juntos até o final!\n\nQualquer dúvida, estamos aqui. Fique com Deus. 🙏`;
+}
