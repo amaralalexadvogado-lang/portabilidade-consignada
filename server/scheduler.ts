@@ -175,6 +175,12 @@ export async function dispatchRetornoDia() {
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// FORMALIZAÇÃO — Lógica nova:
+// • 1ª mensagem do dia → APRESENTAÇÃO (usando "Time de Acompanhamento" + Vendedor)
+// • Demais do dia      → COBRANÇA ("consultamos no banco, não consta assinatura...")
+// • Vira o dia         → reseta, próxima 1ª = apresentação novamente
+// ═══════════════════════════════════════════════════════════════════════════
 export async function dispatchFormalizacao() {
   if (!isWeekday()) return;
   const now = new Date();
@@ -182,19 +188,51 @@ export async function dispatchFormalizacao() {
   if (h < 8 || h >= 18) return;
   const today = now.toISOString().split("T")[0];
   const hStr = String(h).padStart(2, "0");
-  const pendentes = await db.select().from(clients).where(and(eq(clients.active, true), eq(clients.status, "pendente_formalizacao"), eq(clients.formalizacaoConcluida, false)));
+
+  const pendentes = await db.select().from(clients).where(and(
+    eq(clients.active, true),
+    eq(clients.status, "pendente_formalizacao"),
+    eq(clients.formalizacaoConcluida, false)
+  ));
+
   for (const c of pendentes) {
-    if (c.hasReplied) continue; // ✅ para quando cliente já respondeu
+    if (c.hasReplied) continue;
     if (!c.phone) continue;
-    const key = `${today}_formalizacao_${hStr}_c${c.id}`;
-    if (await alreadySent(key)) continue;
-    const msg = buildMessage("formalizacao_1h", c, 0);
+
+    // Verifica se a apresentação de HOJE já foi enviada
+    const apresentacaoKey = `${today}_formalizacao_apresentacao_c${c.id}`;
+    const apresentacaoEnviadaHoje = await alreadySent(apresentacaoKey);
+
+    let key: string;
+    let messageType: string;
+    let period: "formalizacao_apresentacao" | "formalizacao_cobranca";
+
+    if (!apresentacaoEnviadaHoje) {
+      // 1ª do dia → apresentação
+      key = apresentacaoKey;
+      messageType = "formalizacao_apresentacao";
+      period = "formalizacao_apresentacao";
+    } else {
+      // Demais do dia → cobrança (uma por hora)
+      key = `${today}_formalizacao_cobranca_${hStr}_c${c.id}`;
+      if (await alreadySent(key)) continue;
+      messageType = "formalizacao_cobranca";
+      period = "formalizacao_cobranca";
+    }
+
+    const msg = buildMessage(period, c, 0);
     const result = await sendWhatsAppMessage(c.phone, msg);
-    await saveLog({ clientId: c.id, phone: c.phone, message: msg, messageType: "formalizacao_1h", dispatchKey: key, success: result.success, error: result.error, days: 0 });
+    await saveLog({ clientId: c.id, phone: c.phone, message: msg, messageType, dispatchKey: key, success: result.success, error: result.error, days: 0 });
     await new Promise(r => setTimeout(r, 1500));
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// DESBLOQUEIO — Lógica nova (idêntica à formalização):
+// • 1ª mensagem do dia → APRESENTAÇÃO (Time de Acompanhamento + Vendedor)
+// • Demais do dia      → COBRANÇA ("consultamos no INSS, não consta desbloqueio...")
+// • Vira o dia         → reseta
+// ═══════════════════════════════════════════════════════════════════════════
 export async function dispatchDesbloqueio() {
   if (!isWeekday()) return;
   const now = new Date();
@@ -202,15 +240,38 @@ export async function dispatchDesbloqueio() {
   if (h < 8 || h >= 18) return;
   const today = now.toISOString().split("T")[0];
   const hStr = String(h).padStart(2, "0");
-  const bloqueados = await db.select().from(clients).where(and(eq(clients.active, true), eq(clients.status, "aguarda_desbloqueio"), eq(clients.desbloqueoConcluido, false)));
+
+  const bloqueados = await db.select().from(clients).where(and(
+    eq(clients.active, true),
+    eq(clients.status, "aguarda_desbloqueio"),
+    eq(clients.desbloqueoConcluido, false)
+  ));
+
   for (const c of bloqueados) {
-    if (c.hasReplied) continue; // ✅ para quando cliente já respondeu
+    if (c.hasReplied) continue;
     if (!c.phone) continue;
-    const key = `${today}_desbloqueio_${hStr}_c${c.id}`; // ✅ só por hora, não por minuto
-    if (await alreadySent(key)) continue;
-    const msg = buildMessage("desbloqueio_1h", c, 0);
+
+    const apresentacaoKey = `${today}_desbloqueio_apresentacao_c${c.id}`;
+    const apresentacaoEnviadaHoje = await alreadySent(apresentacaoKey);
+
+    let key: string;
+    let messageType: string;
+    let period: "desbloqueio_apresentacao" | "desbloqueio_cobranca";
+
+    if (!apresentacaoEnviadaHoje) {
+      key = apresentacaoKey;
+      messageType = "desbloqueio_apresentacao";
+      period = "desbloqueio_apresentacao";
+    } else {
+      key = `${today}_desbloqueio_cobranca_${hStr}_c${c.id}`;
+      if (await alreadySent(key)) continue;
+      messageType = "desbloqueio_cobranca";
+      period = "desbloqueio_cobranca";
+    }
+
+    const msg = buildMessage(period, c, 0);
     const result = await sendWhatsAppMessage(c.phone, msg);
-    await saveLog({ clientId: c.id, phone: c.phone, message: msg, messageType: "desbloqueio_1h", dispatchKey: key, success: result.success, error: result.error, days: 0 });
+    await saveLog({ clientId: c.id, phone: c.phone, message: msg, messageType, dispatchKey: key, success: result.success, error: result.error, days: 0 });
     await new Promise(r => setTimeout(r, 1500));
   }
 }
@@ -243,10 +304,10 @@ export function startScheduler() {
   cron.schedule("0 15 * * 1-5",   () => dispatchPeriod("afternoon"), { timezone: "America/Sao_Paulo" });
   cron.schedule("0 9-17 * * 1-5", () => dispatchRetornoDia(),        { timezone: "America/Sao_Paulo" });
   cron.schedule("0 8-18 * * 1-5", () => dispatchFormalizacao(),      { timezone: "America/Sao_Paulo" });
-  cron.schedule("*/30 8-18 * * 1-5", () => dispatchDesbloqueio(),    { timezone: "America/Sao_Paulo" });
+  cron.schedule("0 8-18 * * 1-5", () => dispatchDesbloqueio(),       { timezone: "America/Sao_Paulo" }); // ← agora 1h (era 30min)
   cron.schedule("0 20 * * 1-5",   () => sendDailyReport(),           { timezone: "America/Sao_Paulo" });
   cron.schedule("*/30 * * * *",   () => syncFromGoogleSheets(),      { timezone: "America/Sao_Paulo" });
   setTimeout(() => syncFromGoogleSheets(), 5000);
   console.log("[Scheduler] ✅ Todos os cron jobs registrados.");
-  console.log("[Scheduler] 📋 Formalização: 1h | Desbloqueio: 30min | Retorno: 1h");
+  console.log("[Scheduler] 📋 Formalização: 1h | Desbloqueio: 1h | Retorno: 1h");
 }
