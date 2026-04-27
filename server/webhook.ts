@@ -4,8 +4,8 @@
 
 import type { Request, Response, Express } from "express";
 import { eq, or } from "drizzle-orm";
-import { db } from "./db";                       // ajuste se seu db estiver em outro caminho
-import { clients, messageLogs } from "./schema"; // ajuste se seu schema estiver em outro caminho
+import { db } from "./db";
+import { clients, messageLogs } from "../drizzle/schema";
 import { detectAllIntents } from "./intent-detector";
 
 // Payload típico do Z-API "ao receber mensagem"
