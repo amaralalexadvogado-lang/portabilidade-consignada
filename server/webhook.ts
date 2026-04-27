@@ -10,12 +10,12 @@ import { detectAllIntents } from "./intent-detector";
 
 // Payload típico do Z-API "ao receber mensagem"
 interface ZapiIncomingPayload {
-  phone?: string;             // telefone com DDI, ex: 5511999999999
-  fromMe?: boolean;           // true = mensagem ENVIADA por nós (ignorar)
-  isGroup?: boolean;          // true = grupo (ignorar)
-  type?: string;              // ex: "ReceivedCallback"
+  phone?: string;
+  fromMe?: boolean;
+  isGroup?: boolean;
+  type?: string;
   messageId?: string;
-  momment?: number;           // timestamp em ms (Z-API escreve assim mesmo)
+  momment?: number;
   text?: { message?: string };
 }
 
@@ -35,7 +35,7 @@ export function registerWebhookRoutes(app: Express) {
     try {
       const payload = req.body as ZapiIncomingPayload;
 
-      // 1) Filtros básicos
+      // 1) Filtros: ignora mensagens enviadas por nós, grupos e callbacks de outro tipo
       if (!payload || payload.fromMe === true || payload.isGroup === true) {
         return res.status(200).json({ ok: true, ignored: "fromMe_or_group" });
       }
@@ -59,41 +59,58 @@ export function registerWebhookRoutes(app: Express) {
 
       const client = found[0];
 
-      // 3) Loga a mensagem recebida (mesmo se cliente não foi achado)
-      await db.insert(messageLogs).values({
-        clientId: client?.id ?? null,
-        phone: normalizePhone(phone),
-        direction: "inbound",
-        status: "received",
-        content: text,
-        zapiMessageId: payload.messageId ?? null,
-        sentAt: new Date(payload.momment ?? Date.now()),
-      } as any);
-
       if (!client) {
-        console.log(`[webhook/zapi] cliente não encontrado para o telefone ${phone}`);
+        console.log(`[webhook/zapi] cliente não encontrado para o telefone ${phone} — texto: "${text}"`);
         return res.status(200).json({ ok: true, ignored: "client_not_found" });
       }
 
+      // 3) Loga a mensagem recebida
+      const dispatchKey = payload.messageId
+        ? `inbound_${payload.messageId}`
+        : `inbound_${client.id}_${Date.now()}`;
+
+      await db.insert(messageLogs).values({
+        clientId: client.id,
+        phone: normalizePhone(phone),
+        message: text,
+        messageType: "inbound_received",
+        direction: "inbound",
+        dispatchKey,
+        zapiMessageId: payload.messageId ?? null,
+        status: "received",
+        attempts: 0,
+        sentAt: new Date(payload.momment ?? Date.now()),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      } as any);
+
       // 4) Detecta intenção
       const intents = detectAllIntents(text);
-      console.log(`[webhook/zapi] cliente ${client.id} (${client.name}) — intents:`, intents, "— texto:", text);
+      console.log(
+        `[webhook/zapi] cliente ${client.id} (${client.name}) — intents:`,
+        intents,
+        `— texto: "${text}"`
+      );
 
-      // 5) Monta as atualizações
+      // 5) Monta as atualizações usando os campos REAIS do schema
       const updates: Record<string, any> = {
+        hasReplied: true,
         lastResponseAt: new Date(),
         lastResponseText: text.slice(0, 500),
+        updatedAt: new Date(),
       };
 
       if (intents.signed) {
-        updates.signedLinkAt = new Date();
+        // Mesmo efeito do botão manual "Assinou o Link"
+        updates.formalizacaoConcluida = true;
         if (client.status === "pendente_formalizacao") {
           updates.status = "aguarda_desbloqueio";
         }
       }
 
       if (intents.unlocked) {
-        updates.unlockedAt = new Date();
+        // Mesmo efeito do botão manual "Desbloqueou"
+        updates.desbloqueoConcluido = true;
         if (client.status === "aguarda_desbloqueio") {
           updates.status = "aprovado";
         }
@@ -101,7 +118,8 @@ export function registerWebhookRoutes(app: Express) {
 
       if (intents.approved) {
         updates.status = "aprovado";
-        updates.approvedAt = new Date();
+        updates.formalizacaoConcluida = true;
+        updates.desbloqueoConcluido = true;
       }
 
       await db.update(clients).set(updates).where(eq(clients.id, client.id));
@@ -114,7 +132,7 @@ export function registerWebhookRoutes(app: Express) {
       });
     } catch (err) {
       console.error("[webhook/zapi] erro:", err);
-      // Sempre responde 200 pra Z-API não ficar reenviando.
+      // Sempre responde 200 pra Z-API não ficar reenviando
       return res.status(200).json({ ok: false, error: "internal" });
     }
   });
