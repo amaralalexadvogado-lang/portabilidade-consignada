@@ -1,25 +1,23 @@
 // server/intent-detector.ts
 // Detecta a intenção do cliente a partir do texto recebido no WhatsApp.
-// Retorna quais ações foram detectadas (assinou, desbloqueou, aprovado, pediu ajuda).
 
 export type DetectedIntent =
-  | "signed"          // cliente assinou o link de formalização
-  | "unlocked"        // cliente desbloqueou o benefício
-  | "approved"        // cliente diz que foi aprovado / saiu / caiu
-  | "asking_help"     // pediu ajuda — não para envio, só sinaliza
+  | "signed"
+  | "unlocked"
+  | "approved"
+  | "asking_help"
   | null;
 
 function normalize(text: string): string {
   return text
     .toLowerCase()
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "") // remove acentos
-    .replace(/[^a-z0-9\s]/g, " ")    // remove pontuação
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
 
-// Padrões: regex pra capturar variações comuns do português falado/whatsapp.
 const SIGNED_PATTERNS: RegExp[] = [
   /\b(ja|jah|ah|acabei de|acabo de|terminei de|recem)\s+(assin\w+)/,
   /\b(assinei|assinado|assinada|assinou|assinatura\s+feita|assinatura\s+ok)\b/,
@@ -59,8 +57,6 @@ export function detectIntent(rawText: string): DetectedIntent {
   return null;
 }
 
-// Versão que retorna TODAS as intenções (útil quando o cliente diz
-// "já assinei e desbloqueei" numa única mensagem).
 export function detectAllIntents(rawText: string): {
   signed: boolean;
   unlocked: boolean;
